@@ -62,17 +62,17 @@ def check_last_modified():
 def get_last_modified():
     api = Cov19API(filters=area, structure=structure)
     api_timestamp = api.last_update
-    # print("API timestamp", api_timestamp)     
-    last_modified_datetime = datetime.strptime(
-        api_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ"
-    )
+    # print("API timestamp", api_timestamp)
+    last_modified_datetime = datetime.strptime(api_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ")
     return last_modified_datetime
 
 
 def get_local_last_modified():
     try:
         # print("getting local_last_modified")
-        local_last_modified = download_blob(storage_bucket, "local_child_deaths_modified")
+        local_last_modified = download_blob(
+            storage_bucket, "local_child_deaths_modified"
+        )
     except:
         print("Could not access", str(storage_bucket), "local_child_deaths_modified")
         local_last_modified = "1970-01-01 00:00:00"
@@ -94,43 +94,53 @@ def check_data_is_current(data):
 def create_data(json_data):
     # format json
     new_data = []
-    for d in json_data['data']:
-        date = pd.to_datetime(d['date'])
-        for i in d['data']:
+    for d in json_data["data"]:
+        date = pd.to_datetime(d["date"])
+        for i in d["data"]:
             age = i["age"]
             deaths = i["deaths"]
-            new_data.append({'date': date, age : deaths})
+            new_data.append({"date": date, age: deaths})
     # create dataframe
     df = pd.DataFrame(new_data)
-    df.drop(columns=['00_59', "60+",], inplace=True)
-    latest_date = df['date'].max()
+    df.drop(
+        columns=[
+            "00_59",
+            "60+",
+        ],
+        inplace=True,
+    )
+    latest_date = df["date"].max()
 
     # consolidate dates
-    df = df.groupby(df['date']).sum()
+    df = df.groupby(df["date"]).sum()
 
     # add child sum & group by month
-    df['child_deaths'] = df[['00_04', '05_09', '10_14', '15_19']].sum(axis=1)
+    df["child_deaths"] = df[["00_04", "05_09", "10_14", "15_19"]].sum(axis=1)
     df = df.groupby(pd.Grouper(freq="M")).sum()
 
     latest_date = latest_date.strftime("%d/%m/%Y")
-    cumulative_deaths = int(df['child_deaths'].cumsum().max())
+    cumulative_deaths = int(df["child_deaths"].cumsum().max())
 
     return df, latest_date, cumulative_deaths
-    
 
 
 def create_graph(df, latest_date):
-    total_deaths = int(df['child_deaths'].cumsum().max())
+    total_deaths = int(df["child_deaths"].cumsum().max())
     fig, ax = plt.subplots()
     locator = mdates.MonthLocator(bymonthday=-1)
     ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%y'))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    plt.ylabel('deaths')
-    plt.title("Covid-19 Deaths England 0-19 years\n" + str(total_deaths) + " to " + latest_date)
-    ax.bar(df.index, df['child_deaths'], width=20, align='center')
+    plt.ylabel("deaths")
+    plt.title(
+        "Covid-19 Deaths England 0-19 years\n"
+        + str(total_deaths)
+        + " to "
+        + latest_date
+    )
+    ax.bar(df.index, df["child_deaths"], width=20, align="center")
     plt.tight_layout()
-    fig.autofmt_xdate(rotation=90, ha='center')
+    fig.autofmt_xdate(rotation=90, ha="center")
     plt.savefig(graph_file)
 
 
@@ -154,7 +164,9 @@ def create_tweet(cumulative_deaths, latest_date):
     tweet_text = (
         "Latest COVID-19 children (0-19 year) deaths for England - "
         + str(cumulative_deaths)
-        + ".\nLast updated on " + str(latest_date) + "\n#COVID19 #python #pandas\nnewDeaths28DaysByDeathDateAgeDemographics\nhttps://coronavirus.data.gov.uk/details/developers-guide/main-api#structure-metrics"
+        + ".\nLast updated on "
+        + str(latest_date)
+        + "\n#COVID19 #python #pandas\nnewDeaths28DaysByDeathDateAgeDemographics\nhttps://coronavirus.data.gov.uk/details/developers-guide/main-api#structure-metrics"
     )
     api.update_status(tweet_text, media_ids=[media.media_id])
     print("Tweet sent")
@@ -162,42 +174,50 @@ def create_tweet(cumulative_deaths, latest_date):
 
 
 def create_toot(cumulative_deaths, latest_date):
-    auth = {'Authorization': f"Bearer {mastodon_secret}"}
+    auth = {"Authorization": f"Bearer {mastodon_secret}"}
     # upload media
     try:
         url = "https://mastodon.social/api/v2/media"
-        media_info = ('graph.png', open(graph_file, 'rb'), 'image/png')
+        media_info = ("graph.png", open(graph_file, "rb"), "image/png")
         media_description = (
             "Latest COVID-19 children (0-19 year) deaths for England - "
             + str(cumulative_deaths)
-            + ".\nLast updated on " + str(latest_date) + "\n#COVID19 #python #pandas\nnewDeaths28DaysByDeathDateAgeDemographics\nhttps://coronavirus.data.gov.uk/details/developers-guide/main-api#structure-metrics"
+            + ".\nLast updated on "
+            + str(latest_date)
+            + "\n#COVID19 #python #pandas\nnewDeaths28DaysByDeathDateAgeDemographics\nhttps://coronavirus.data.gov.uk/details/developers-guide/main-api#structure-metrics"
         )
-        r = requests.post(url, files={'file': media_info}, headers=auth, params = {'description' : media_description})
-        media_id = r.json()['id']
-        #print(f"Image uploaded to Mastodon - media_id = {media_id}")
+        r = requests.post(
+            url,
+            files={"file": media_info},
+            headers=auth,
+            params={"description": media_description},
+        )
+        media_id = r.json()["id"]
+        # print(f"Image uploaded to Mastodon - media_id = {media_id}")
     except:
         print("Error uploading media to mastodon")
-    
+
     # send toot
     try:
         url = "https://mastodon.social/api/v1/statuses"
         toot_text = (
             "Latest COVID-19 children (0-19 year) deaths for England - "
             + str(cumulative_deaths)
-            + ".\nLast updated on " + str(latest_date) + "\n#COVID19 #python #pandas\nnewDeaths28DaysByDeathDateAgeDemographics\nhttps://coronavirus.data.gov.uk/details/developers-guide/main-api#structure-metrics"
+            + ".\nLast updated on "
+            + str(latest_date)
+            + "\n#COVID19 #python #pandas\nnewDeaths28DaysByDeathDateAgeDemographics\nhttps://coronavirus.data.gov.uk/details/developers-guide/main-api#structure-metrics"
         )
-        params = {'status': toot_text, 'media_ids[]': media_id}
+        params = {"status": toot_text, "media_ids[]": media_id}
         r = requests.post(url, data=params, headers=auth)
     except:
         print("Error sending toot to Mastodon")
-
 
 
 def download_blob(storage_bucket, source_blob_name):
     storage_client = storage.Client()
     bucket = storage_client.bucket(storage_bucket)
     blob = bucket.blob(source_blob_name)
-    blob_string = str(blob.download_as_bytes(), 'utf-8')
+    blob_string = str(blob.download_as_bytes(), "utf-8")
     return blob_string
 
 
